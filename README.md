@@ -3,8 +3,8 @@
 [![build](https://github.com/OpSourced/pipesutils/actions/workflows/build.yml/badge.svg)](https://github.com/OpSourced/pipesutils/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
-Minimal multi-arch (`linux/amd64` + `linux/arm64`) image with the Turbot Pipes
-CLIs, ready to run in Kubernetes or anywhere else a container runs:
+Multi-arch (`linux/amd64` + `linux/arm64`) image with the Turbot Pipes CLIs,
+ready to run in Kubernetes or anywhere else a container runs:
 
 | CLI | Version pin | Purpose |
 | --- | --- | --- |
@@ -12,13 +12,26 @@ CLIs, ready to run in Kubernetes or anywhere else a container runs:
 | [tailpipe](https://tailpipe.io) | `TAILPIPE_VERSION` (v0.7.4) | log collection into a local parquet lake |
 | [powerpipe](https://powerpipe.io) | `POWERPIPE_VERSION` (v1.5.3) | benchmarks + dashboards |
 
+Each build also carries the plugins and vendor CLI for the clouds it targets —
+AWS by default, `--build-arg CLOUDS="aws azure gcp"` for everything. Nothing
+downloads on first run.
+
 ```bash
 docker pull ghcr.io/opsourced/pipesutils:latest
 docker run --rm ghcr.io/opsourced/pipesutils steampipe query "select 1"
 ```
 
-Free to use, no registration and no login needed to pull. Tags: `latest`,
-`sha-<commit>`, and `vX.Y.Z` / `X.Y` on releases.
+Three images are published, one per cloud — pull whichever you need:
+
+```bash
+ghcr.io/opsourced/pipesutils:latest          # AWS  (alias: latest-aws)
+ghcr.io/opsourced/pipesutils:latest-azure    # Azure
+ghcr.io/opsourced/pipesutils:latest-gcp      # GCP
+```
+
+Each carries that cloud's steampipe and tailpipe plugins plus its vendor CLI.
+
+Free to use, no registration and no login needed to pull.
 
 ## What's in it
 
@@ -28,41 +41,128 @@ Free to use, no registration and no login needed to pull. Tags: `latest`,
   root, and the embedded `initdb` needs the uid to resolve to a real passwd
   entry — so `runAsUser` must be `10001`.
 * Baked at build time so pods have no cold-start downloads:
-  * steampipe + tailpipe `aws` plugins
+  * steampipe **and** tailpipe plugins for each selected cloud
+  * that cloud's vendor CLI
   * embedded postgres 14.19 binaries (the initialised cluster and generated
     password are removed, so every pod gets its own)
-* Runtime packages kept to `ca-certificates`, `git` (powerpipe mod install),
-  `less`, `libstdc++6` (DuckDB in tailpipe/powerpipe), `procps`, `tzdata`.
+* Runtime packages otherwise kept to `ca-certificates`, `git` (powerpipe mod
+  install), `less`, `libstdc++6` (DuckDB in tailpipe/powerpipe), `procps`,
+  `tzdata`.
 * Telemetry and update checks off by default.
 
-~1.2 GB uncompressed, and most of that is the CLIs and the AWS plugins
-themselves (aws steampipe plugin 362 MB, aws tailpipe plugin 161 MB, embedded
-postgres 148 MB, three CLI binaries 308 MB).
+### Why this base
+
+`debian:bookworm-slim`, and **not alpine** — I tested rather than assumed:
+
+| Base | Size | Verdict |
+| --- | --- | --- |
+| `alpine:3.22` | 8.3 MB | **Does not work.** musl, not glibc |
+| `gcr.io/distroless/base-debian12` | 20.8 MB | **Rejected.** No shell and no git |
+| `cgr.dev/chainguard/wolfi-base` | 16.3 MB | **Rejected.** No `azure-cli` package |
+| `debian:trixie-slim` | 78.6 MB | **Rejected.** Bigger, and no vendor repo |
+| `ubuntu:24.04` | 78.2 MB | Bigger, no benefit |
+| **`debian:bookworm-slim`** | **74.8 MB** | glibc 2.36, vendor repos support it |
+
+What actually happens on alpine:
+
+```console
+$ docker run --rm -v ./bin:/t alpine:3.22 /t/tailpipe --version
+exec /t/tailpipe: no such file or directory     # wants /lib64/ld-linux-x86-64.so.2
+
+$ docker run --rm -v ./bin:/t alpine:3.22 /t/steampipe service start
+Error: Initializing database... FAILED!         # embedded postgres is glibc-linked
+```
+
+`steampipe` itself is a static Go binary and does start on alpine, which makes
+this failure mode worse than a clean one — it breaks at the first query, not at
+startup. `tailpipe` and `powerpipe` are cgo builds (DuckDB) and are dynamically
+linked, so they do not run at all. Steampipe v2.0.0 raised the floor explicitly:
+
+> Increased the minimum required `glibc` version to `2.34` for the FDW […]
+> Steampipe no longer supports older Linux distributions such as Ubuntu 20.04
+> and Amazon Linux 2.
+
+A musl base would need `gcompat` shims under the embedded PostgreSQL, the FDW
+and DuckDB. That is not a supported configuration by anyone involved.
+
+Wolfi was the near miss: glibc 2.41, 16 MB, and it packages `google-cloud-sdk`,
+`aws-cli-2`, `git` and `bash`. But it has no `azure-cli`, and `az` has no
+install path that is not apt or pip — so the `-all` variant could not be built.
+Saving 58 MB on a 1.4 GB image was not worth splitting bases over.
+
+Which is the honest framing: **the base is ~5% of the image**. The plugins and
+vendor CLIs are the other 95%, and `CLOUDS` is the knob that moves them.
+
+### Picking clouds
+
+One build arg decides the contents:
+
+```bash
+docker build -t pipesutils:aws .                                   # default
+docker build --build-arg CLOUDS="aws azure" -t pipesutils:aws-azure .
+docker build --build-arg CLOUDS="aws azure gcp" -t pipesutils:all .
+```
+
+| `CLOUDS` | Plugins | Vendor CLI | Size | Published as |
+| --- | --- | --- | --- | --- |
+| `aws` (default) | steampipe + tailpipe `aws` | `aws` v2 | 1.44 GB | `latest`, `latest-aws` |
+| `azure` | steampipe + tailpipe `azure` | `az` | 1.52 GB | `latest-azure` |
+| `gcp` | steampipe + tailpipe `gcp` | `gcloud` | 1.66 GB | `latest-gcp` |
+| `aws azure gcp` | all six | all three | 3.18 GB | not published — build it yourself |
+
+Sizes are measured, uncompressed, amd64.
+
+Need two clouds in one container? Either build it (`--build-arg CLOUDS="aws
+azure"`) or add the second cloud's plugins at startup with
+`EXTRA_STEAMPIPE_PLUGINS` — the vendor CLI is the only part that cannot be
+added at run time.
+
+The plugin and the vendor CLI ship together because for two of the three
+clouds they are not independent:
+
+* The **Azure** plugin's credential chain ends at
+  `azidentity.NewAzureCLICredential` — it executes `az` unless you hand it a
+  client secret or certificate. It has no workload-identity credential, so
+  `az login --federated-token` is the only secretless path on EKS.
+* The **GCP** plugin reads Application Default Credentials, which is what
+  `gcloud auth application-default login` writes.
+* **AWS** needs no CLI for IRSA, but `aws sso login`, `aws logs tail` and
+  `sts get-caller-identity` are what you reach for when a role is misbehaving.
+
+Unselected clouds are decided in the build's fetch stage, so nothing is
+downloaded and nothing lands in a lower layer to be deleted later — an
+AWS-only image genuinely does not contain `az`.
 
 ### Build args
 
 | Arg | Default | Notes |
 | --- | --- | --- |
+| `CLOUDS` | `aws` | space separated: `aws`, `azure`, `gcp`. A typo fails the build immediately |
 | `STEAMPIPE_VERSION` / `TAILPIPE_VERSION` / `POWERPIPE_VERSION` | pinned tags | release tags on the turbot repos |
-| `STEAMPIPE_PLUGINS` | `aws` | space separated, baked in |
-| `TAILPIPE_PLUGINS` | `aws` | space separated, baked in |
+| `STEAMPIPE_PLUGINS` | follows `CLOUDS` | override to add plugins outside the cloud list, e.g. `"aws azuread"` |
+| `TAILPIPE_PLUGINS` | follows `CLOUDS` | same |
+| `INSTALL_AWS_CLI` | `auto` | `auto` follows `CLOUDS`; `true`/`false` force it |
+| `INSTALL_AZURE_CLI` | `auto` | same |
+| `INSTALL_GCLOUD` | `auto` | same |
 | `PRELOAD_STEAMPIPE_DB` | `true` | pre-pull the embedded postgres |
-| `INCLUDE_POWERPIPE` | `true` | set `false` to drop 127 MB |
-| `PIPES_UID` / `PIPES_GID` | `10001` | must match `runAsUser` in the manifests |
+| `INCLUDE_POWERPIPE` | `true` | set `false` to drop 132 MB |
+| `PIPES_UID` / `PIPES_GID` | `10001` | must match `runAsUser` in your manifests |
 
-Every release asset is checksum-verified against the release `checksums.txt`
-([hack/fetch-release.sh](hack/fetch-release.sh)).
-
-Slim variant:
+The selected clouds are recorded on the image, so a running container can tell
+what it is:
 
 ```bash
-docker build \
-  --build-arg INCLUDE_POWERPIPE=false \
-  --build-arg STEAMPIPE_PLUGINS= \
-  --build-arg TAILPIPE_PLUGINS= \
-  --build-arg PRELOAD_STEAMPIPE_DB=false \
-  -t pipesutils:slim .
+docker inspect -f '{{ index .Config.Labels "io.pipesutils.clouds" }}' <image>
+echo "$PIPES_CLOUDS"   # same value, inside the container
 ```
+
+Turbot release assets are checksum-verified against the release
+`checksums.txt`; the AWS CLI installer is GPG-verified
+([hack/fetch-release.sh](hack/fetch-release.sh),
+[hack/fetch-cloud-clis.sh](hack/fetch-cloud-clis.sh)).
+
+Plugins not baked in still install at run time as usual —
+`steampipe plugin install azuread`.
 
 ## Running it
 
@@ -80,6 +180,45 @@ Entrypoint env:
 | --- | --- | --- |
 | `STEAMPIPE_START_SERVICE` | `false` | start the embedded postgres before `CMD`, stop it on SIGTERM |
 | `STEAMPIPE_DATABASE_LISTEN` | `local` | `network` exposes 9193 to other pods |
+| `EXTRA_STEAMPIPE_PLUGINS` | — | plugins to install at startup, space separated |
+| `EXTRA_TAILPIPE_PLUGINS` | — | same, for tailpipe |
+| `EXTRA_CLI` | — | vendor CLIs to install at startup. `aws` only — see below |
+
+### Adding things at startup
+
+Without rebuilding, for when you need something the image was not built with:
+
+```bash
+docker run --rm \
+  -e EXTRA_STEAMPIPE_PLUGINS="azuread kubernetes" \
+  -e EXTRA_TAILPIPE_PLUGINS="gcp" \
+  ghcr.io/opsourced/pipesutils steampipe query "select 1"
+```
+
+In Kubernetes, set them on the container and the pod picks them up on restart:
+
+```yaml
+env:
+  - name: EXTRA_STEAMPIPE_PLUGINS
+    value: "azuread kubernetes"
+```
+
+Anything already present is detected and skipped, so this is safe to leave set.
+
+Two caveats worth knowing before you rely on it:
+
+* **It is not persistent.** Installs land in `$HOME`, which is an image layer,
+  so they are re-downloaded on every container start — a few seconds and a few
+  hundred MB each time. Mount a volume over `~/.steampipe/plugins` to keep
+  them, or bake them in with `CLOUDS` / `STEAMPIPE_PLUGINS` once you know what
+  you need.
+* **`EXTRA_CLI` only supports `aws`.** The AWS CLI has a self-contained
+  installer that works in a user directory. `az` and `gcloud` come from vendor
+  apt repos and need root, which this container does not have — asking for
+  them fails with a message pointing at `latest-azure` / `latest-gcp` rather
+  than half-installing something. The AWS startup install is also HTTPS-only, with
+  none of the GPG verification the build-time install does, so prefer a baked
+  image where it matters.
 
 ## CI
 
@@ -89,9 +228,20 @@ Entrypoint env:
 slow and flaky. Each arch is pushed by digest, then a `merge` job joins them
 into one manifest list, and cosign keyless-signs it.
 
-* PRs: build + smoke test only, nothing is pushed.
-* `main`: `latest`, `sha-<sha>`.
-* tags `v*`: `v1.2.3`, `1.2`, plus `latest`.
+Three variants are published from the same Dockerfile, each as its own
+manifest list covering both architectures:
+
+| Cloud | Tags |
+| --- | --- |
+| AWS | `latest`, `latest-aws`, `v1.2.3`, `1.2`, `sha-<sha>` |
+| Azure | `latest-azure`, `v1.2.3-azure`, `1.2-azure`, `sha-<sha>-azure` |
+| GCP | `latest-gcp`, `v1.2.3-gcp`, `1.2-gcp`, `sha-<sha>-gcp` |
+
+* PRs: all three clouds, **amd64 only**, build + smoke test, nothing pushed.
+  Arch-specific breakage is rare and caught on `main`; a cloud-specific
+  regression would not be.
+* `main` and tags: all three clouds on both architectures, signed and scanned
+  per variant.
 * weekly cron rebuild for base-image CVE patches, then a Trivy scan uploaded to
   code scanning.
 * `workflow_dispatch` takes optional `steampipe_version` / `tailpipe_version` /
@@ -107,8 +257,9 @@ arm64 leg to take considerably longer.
 
 ### First publish
 
-GHCR packages start **private** even when the repository is public. After the
-first successful push to `main`, open the package settings once and set
+GHCR packages start **private** even when the repository is public. All three
+variants are tags on the single `pipesutils` package, so this is one switch:
+after the first successful push to `main`, open the package settings and set
 visibility to public — otherwise `docker pull` asks anonymous users for
 credentials. The image carries `org.opencontainers.image.source`, so GHCR links
 the package to this repository and inherits its README automatically.
@@ -164,7 +315,9 @@ This repository — the Dockerfile, entrypoint, build scripts and CI — is
 
 The **image** redistributes third-party binaries under their own licenses. The
 Steampipe, Tailpipe and Powerpipe CLIs are **AGPL-3.0**, shipped unmodified;
-the plugins and the Postgres FDW are Apache-2.0. That combination is fine to
+the plugins and the Postgres FDW are Apache-2.0; the AWS and Google Cloud CLIs
+are Apache-2.0 (with some Google SDK components under Google's SDK terms) and
+the Azure CLI is MIT. That combination is fine to
 run and to redistribute, and using the CLIs to query your own infrastructure
 carries no obligation. If you modify those CLIs and offer them to users over a
 network, AGPL-3.0 section 13 applies to your modified version.

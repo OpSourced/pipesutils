@@ -33,14 +33,31 @@ concurrency:
 
 jobs:
   build:
-    name: build (${{ matrix.platform }})
+    name: build (${{ matrix.variant.name }}, ${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
+    # PRs build all three clouds but amd64 only - arch-specific breakage is
+    # rare and caught on main, whereas a cloud-specific one is not.
+    if: github.event_name != 'pull_request' || matrix.platform == 'linux/amd64'
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
       matrix:
+        variant:
+          - name: aws
+            clouds: aws
+            suffix: ""
+          - name: azure
+            clouds: azure
+            suffix: "-azure"
+          - name: gcp
+            clouds: gcp
+            suffix: "-gcp"
+        platform:
+          - linux/amd64
+          - linux/arm64
+        # matching entries just add `runner` to the existing combinations
         include:
           - platform: linux/amd64
             runner: ubuntu-24.04
@@ -52,10 +69,11 @@ jobs:
       - name: Prepare
         id: prep
         run: |
-          echo "pair=${platform//\//-}" >> "$GITHUB_OUTPUT"
+          echo "pair=${platform//\//-}-${variant}" >> "$GITHUB_OUTPUT"
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
         env:
           platform: ${{ matrix.platform }}
+          variant: ${{ matrix.variant.name }}
 
       - uses: docker/setup-buildx-action@v4
 
@@ -81,6 +99,7 @@ jobs:
           sbom: true
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            CLOUDS=${{ matrix.variant.clouds }}
             ${{ inputs.steampipe_version && format('STEAMPIPE_VERSION={0}', inputs.steampipe_version) || '' }}
             ${{ inputs.tailpipe_version && format('TAILPIPE_VERSION={0}', inputs.tailpipe_version) || '' }}
             ${{ inputs.powerpipe_version && format('POWERPIPE_VERSION={0}', inputs.powerpipe_version) || '' }}
@@ -102,6 +121,15 @@ jobs:
             steampipe plugin list
             tailpipe plugin list
             steampipe query "select 1 as ok" --output json
+            # every selected cloud must have brought its vendor CLI with it
+            for cloud in $PIPES_CLOUDS; do
+              case "$cloud" in
+                aws)   aws --version ;;
+                azure) az version --output tsv ;;
+                gcp)   gcloud --version | head -1 ;;
+              esac
+              steampipe plugin list | grep -q "/$cloud@"
+            done
           '
 
       - name: Export digest
@@ -121,7 +149,7 @@ jobs:
           retention-days: 1
 
   merge:
-    name: merge manifest list
+    name: merge manifest list (${{ matrix.variant.name }})
     needs: [build]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
@@ -129,6 +157,16 @@ jobs:
       contents: read
       packages: write
       id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: aws
+            suffix: ""
+          - name: azure
+            suffix: "-azure"
+          - name: gcp
+            suffix: "-gcp"
     steps:
       - name: Prepare
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -136,7 +174,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
-          pattern: digests-*
+          pattern: digests-*-${{ matrix.variant.name }}
           merge-multiple: true
 
       - uses: docker/setup-buildx-action@v4
@@ -151,12 +189,16 @@ jobs:
         id: meta
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: latest=false
+          # `latest` is the AWS image; every cloud also gets an explicit
+          # latest-<cloud> so nobody has to remember which one is the default
           tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest${{ matrix.variant.suffix }},enable={{is_default_branch}}
+            type=raw,value=latest-${{ matrix.variant.name }},enable={{is_default_branch}}
+            type=ref,event=branch,suffix=${{ matrix.variant.suffix }}
+            type=semver,pattern={{version}},suffix=${{ matrix.variant.suffix }}
+            type=semver,pattern={{major}}.{{minor}},suffix=${{ matrix.variant.suffix }}
+            type=sha,format=long,suffix=${{ matrix.variant.suffix }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
@@ -176,7 +218,7 @@ jobs:
       - name: Inspect
         run: docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${{ steps.meta.outputs.version }}"
 
-      - uses: sigstore/cosign-installer@v4
+      - uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign the manifest list (keyless)
         run: |
@@ -184,7 +226,7 @@ jobs:
           cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${digest}"
 
   scan:
-    name: trivy scan
+    name: trivy scan (${{ matrix.variant.name }})
     needs: [merge]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
@@ -192,13 +234,23 @@ jobs:
       contents: read
       packages: read
       security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: aws
+            suffix: ""
+          - name: azure
+            suffix: "-azure"
+          - name: gcp
+            suffix: "-gcp"
     steps:
       - name: Prepare
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}${{ matrix.variant.suffix }}
           format: sarif
           output: trivy.sarif
           severity: HIGH,CRITICAL
@@ -206,3 +258,4 @@ jobs:
       - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy.sarif
+          category: trivy-${{ matrix.variant.name }}

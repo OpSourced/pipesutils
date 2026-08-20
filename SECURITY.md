@@ -21,9 +21,15 @@ picking up here, and we will bump the pinned version.
 
 ## Supply chain
 
-* Every CLI is downloaded from its upstream GitHub release and verified
-  against the publisher's `checksums.txt` before it is installed. A mismatch
-  fails the build.
+* The Turbot CLIs are downloaded from their upstream GitHub releases and
+  verified against the publisher's `checksums.txt` before installation. A
+  mismatch fails the build.
+* The AWS CLI v2 installer is GPG-verified against the AWS CLI Team key,
+  committed at `hack/aws-cli-public-key.asc`. The build asserts both a valid
+  signature and the exact fingerprint, so an expired-key warning cannot pass
+  for a good signature.
+* The Azure and Google Cloud CLIs come from their vendor apt repositories,
+  pinned to keyrings fetched at build time and enforced by apt's `signed-by`.
 * Published manifest lists are signed with
   [cosign](https://github.com/sigstore/cosign) using keyless OIDC signing:
 

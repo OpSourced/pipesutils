@@ -19,12 +19,25 @@ docker build -t pipesutils:dev .
 docker run --rm pipesutils:dev steampipe query "select 1"
 ```
 
-Useful build args while iterating (a full build downloads ~500 MB of plugins):
+The default build is AWS-only. CI publishes one image per cloud, and you can
+build any of them locally — or a combined one, which CI does not publish:
+
+```bash
+docker build --build-arg CLOUDS=azure -t pipesutils:azure .
+docker build --build-arg CLOUDS=gcp   -t pipesutils:gcp .
+docker build --build-arg CLOUDS="aws azure gcp" -t pipesutils:all .
+```
+
+If you touch anything cloud-specific, build the affected variant before
+opening the PR. CI builds all three on every PR, but amd64 only.
+
+For fast iteration on the Dockerfile itself, skip the slow parts:
 
 ```bash
 docker build \
-  --build-arg STEAMPIPE_PLUGINS= \
-  --build-arg TAILPIPE_PLUGINS= \
+  --build-arg STEAMPIPE_PLUGINS=" " \
+  --build-arg TAILPIPE_PLUGINS=" " \
+  --build-arg INSTALL_AWS_CLI=false \
   --build-arg PRELOAD_STEAMPIPE_DB=false \
   -t pipesutils:dev .
 ```
@@ -62,10 +75,20 @@ pushes nothing for pull requests.
 * **The image cannot run as root.** Steampipe refuses uid 0, and its embedded
   `initdb` needs the uid to resolve to a real passwd entry. The `pipes` user
   (uid 10001) is load-bearing.
-* **musl bases will not work.** Steampipe v2's FDW requires glibc >= 2.34.
+* **musl bases will not work.** Steampipe v2's FDW requires glibc >= 2.34. On
+  alpine `tailpipe` will not exec at all and steampipe's embedded postgres
+  fails at `Initializing database`. The README's "Why this base" section has
+  the full comparison, including why Wolfi and distroless were rejected — read
+  it before proposing a base change.
 * `libstdc++6` is needed by the DuckDB engine inside Tailpipe and Powerpipe.
 * The embedded PostgreSQL binaries bundle their own OpenSSL and do not link
   ICU, so do not add `libicu` back "just in case".
+* Anything a build can exclude must be decided in the **fetch stage**. A
+  `COPY` followed by a conditional `rm` in the runtime stage still leaves the
+  bytes in the lower layer — the image gets no smaller, it just hides them.
+* `COPY` dereferences a symlink named directly as its source. The AWS CLI's
+  `/usr/local/bin/aws` is a symlink into a versioned tree; copy it and you get
+  a binary that cannot find its own libpython.
 * The build pre-pulls the embedded database and then deletes the initialised
   cluster and its generated password, so every container generates its own.
   Keep it that way.

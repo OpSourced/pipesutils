@@ -30,13 +30,43 @@ requires you to offer those users the modified source.
 | --- | --- | --- |
 | steampipe-postgres-fdw | Apache-2.0 | https://github.com/turbot/steampipe-postgres-fdw |
 | steampipe-plugin-aws | Apache-2.0 | https://github.com/turbot/steampipe-plugin-aws |
+| steampipe-plugin-azure | Apache-2.0 | https://github.com/turbot/steampipe-plugin-azure |
+| steampipe-plugin-gcp | Apache-2.0 | https://github.com/turbot/steampipe-plugin-gcp |
 | tailpipe-plugin-aws | Apache-2.0 | https://github.com/turbot/tailpipe-plugin-aws |
+| tailpipe-plugin-azure | Apache-2.0 | https://github.com/turbot/tailpipe-plugin-azure |
+| tailpipe-plugin-gcp | Apache-2.0 | https://github.com/turbot/tailpipe-plugin-gcp |
 | tailpipe-plugin-core | Apache-2.0 | https://github.com/turbot/tailpipe-plugin-core |
 
-Which plugins are present depends on the `STEAMPIPE_PLUGINS` and
-`TAILPIPE_PLUGINS` build args; the defaults are listed above. Run
+Which plugins are present follows the `CLOUDS` build arg (or the
+`STEAMPIPE_PLUGINS` / `TAILPIPE_PLUGINS` overrides); the table above lists
+every plugin any variant can contain. Run
 `steampipe plugin list` / `tailpipe plugin list` in a container to see what a
 given image actually contains.
+
+## Vendor cloud CLIs
+
+| Component | License | Source |
+| --- | --- | --- |
+| AWS CLI v2 | Apache-2.0 | https://github.com/aws/aws-cli |
+| Azure CLI | MIT | https://github.com/Azure/azure-cli |
+| Google Cloud CLI | Apache-2.0, some components under the [Google Cloud SDK Terms of Service](https://cloud.google.com/sdk/docs/terms) | https://cloud.google.com/sdk |
+
+The AWS CLI installer is GPG-verified against the AWS CLI Team key
+(`FB5D B77F D5C1 18B8 0511  ADA8 A631 0ACC 4672 475C`, committed at
+[hack/aws-cli-public-key.asc](hack/aws-cli-public-key.asc)) before it is
+unpacked. The Azure and Google CLIs come from their vendor apt repositories,
+verified by apt against the repository signing keys.
+
+Each ships its own copyright file inside the image:
+`/usr/share/doc/azure-cli/copyright` and
+`/usr/share/doc/google-cloud-cli/copyright`.
+
+Which of these are present follows the `CLOUDS` build arg — an `aws` image
+contains only the AWS CLI. Check a given image with:
+
+```bash
+docker inspect -f '{{ index .Config.Labels "io.pipesutils.clouds" }}' <image>
+```
 
 ## Embedded in the upstream binaries
 
