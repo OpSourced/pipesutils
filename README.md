@@ -255,14 +255,31 @@ If `ubuntu-24.04-arm` runners are not available on the org plan, swap that
 matrix entry to `ubuntu-24.04`, add `docker/setup-qemu-action`, and expect the
 arm64 leg to take considerably longer.
 
-### First publish
+### First publish: make the package public
 
-GHCR packages start **private** even when the repository is public. All three
-variants are tags on the single `pipesutils` package, so this is one switch:
-after the first successful push to `main`, open the package settings and set
-visibility to public — otherwise `docker pull` asks anonymous users for
-credentials. The image carries `org.opencontainers.image.source`, so GHCR links
-the package to this repository and inherits its README automatically.
+GHCR packages are **private by default**, even when the repository is public.
+Until someone flips this, `docker pull` prompts anonymous users for
+credentials. All three cloud variants are tags on a single `pipesutils`
+package, so this is one switch, done once:
+
+1. Push to `main` so the workflow creates the package.
+2. Go to the package page — either from the repo's right-hand sidebar under
+   **Packages**, or directly:
+   `https://github.com/orgs/OpSourced/packages/container/package/pipesutils`
+3. **Package settings** (right-hand side) → scroll to **Danger Zone** →
+   **Change visibility** → **Public**, then type the package name to confirm.
+
+While in package settings, check **Manage Actions access** lists this
+repository with at least `Write` — that is what lets the workflow push new
+tags. The image sets `org.opencontainers.image.source`, so GitHub links the
+package to this repo automatically and the repo README shows on the package
+page.
+
+Repository visibility is separate: **repo Settings → General → Danger Zone →
+Change repository visibility**.
+
+The Trivy scan authenticates with `GITHUB_TOKEN` rather than relying on the
+package being public, so scanning works before and after this switch.
 
 ## Running it in Kubernetes
 
