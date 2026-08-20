@@ -10,3 +10,7 @@ ignored:
   # SC2086 - word splitting. Intentional: package and plugin lists are
   # space-separated build args that must split.
   - SC2086
+  # DL3066 - non-numeric user id. False positive on `USER ${PIPES_UID}`: the
+  # arg defaults to 10001 and hadolint does not evaluate build args. Fixed
+  # upstream in hadolint 2.15.1, but hadolint-action@v3.4.0 pins 2.15.0.
+  - DL3066

@@ -63,11 +63,17 @@ rather than waiting on a 15-minute build:
 
 ```bash
 docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest
-docker run --rm -v "$PWD":/mnt -w /mnt hadolint/hadolint \
+docker run --rm -v "$PWD":/mnt -w /mnt ghcr.io/hadolint/hadolint:v2.15.0-debian \
   hadolint --config .hadolint.yaml Dockerfile
 docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable \
   hack/*.sh docker/entrypoint.sh
 ```
+
+Use the **pinned** hadolint tag above, not `hadolint/hadolint:latest`. CI runs
+whatever `hadolint-action` pins (2.15.0 today), and the two versions disagree:
+2.15.1 fixed a DL3066 false positive that 2.15.0 still reports, so a `latest`
+run locally passes while CI fails. If Dependabot bumps the action, bump this
+tag with it.
 
 `actionlint` in particular catches workflow expressions that GitHub rejects
 only at run time — for example the `matrix` context, which is not available in
