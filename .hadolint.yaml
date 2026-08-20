@@ -1,0 +1,12 @@
+# Rules we deliberately do not follow.
+ignored:
+  # DL3008 - pin apt package versions. We rebuild weekly to pick up base image
+  # and CVE patches; pinning would defeat that and rot instead.
+  - DL3008
+  # DL3059 - consolidate consecutive RUN instructions. The downloads are kept
+  # in separate layers on purpose so a single CLI version bump does not
+  # invalidate the cache for the others.
+  - DL3059
+  # SC2086 - word splitting. Intentional: package and plugin lists are
+  # space-separated build args that must split.
+  - SC2086

@@ -33,7 +33,8 @@ awscli)
 
   echo "==> verifying signature"
   export GNUPGHOME="${work}/gnupg"
-  mkdir -m 700 -p "$GNUPGHOME"
+  mkdir -p "$GNUPGHOME"
+  chmod 700 "$GNUPGHOME"
   gpg --batch --quiet --import /usr/local/share/aws-cli-public-key.asc
   # AWS still signs with a key that shows as expired, so gpg exits 0 with a
   # warning. Assert on the output instead of trusting the exit code alone.

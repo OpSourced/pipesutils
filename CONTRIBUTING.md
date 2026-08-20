@@ -56,8 +56,29 @@ docker build --build-arg STEAMPIPE_VERSION=v2.4.4 -t pipesutils:test .
 
 The same inputs exist on the `workflow_dispatch` trigger.
 
+## Linting
+
+CI runs these on every PR, and they take seconds - run them before pushing
+rather than waiting on a 15-minute build:
+
+```bash
+docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest
+docker run --rm -v "$PWD":/mnt -w /mnt hadolint/hadolint \
+  hadolint --config .hadolint.yaml Dockerfile
+docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable \
+  hack/*.sh docker/entrypoint.sh
+```
+
+`actionlint` in particular catches workflow expressions that GitHub rejects
+only at run time — for example the `matrix` context, which is not available in
+a job-level `if`.
+
+Rules we deliberately ignore are listed with their reasons in
+[.hadolint.yaml](.hadolint.yaml).
+
 ## Before opening a PR
 
+* the linters above pass
 * `docker build .` succeeds
 * the smoke test passes:
 

@@ -113,6 +113,7 @@ echo "==> starting steampipe service (listen=${STEAMPIPE_DATABASE_LISTEN:-local}
 steampipe service start --database-listen "${STEAMPIPE_DATABASE_LISTEN:-local}"
 
 child=""
+# shellcheck disable=SC2329  # invoked by the trap below
 shutdown() {
   trap - INT TERM EXIT
   [ -n "$child" ] && kill -TERM "$child" 2>/dev/null || true

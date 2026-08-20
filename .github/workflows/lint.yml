@@ -1,0 +1,36 @@
+name: lint
+
+# The build takes ~15 minutes per variant; these checks take seconds and catch
+# the things that would otherwise fail after the queue - a workflow expression
+# using a context that is not available there, a shell bug in the entrypoint,
+# a Dockerfile mistake.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: actionlint
+        uses: raven-actions/actionlint@v2
+
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.4.0
+        with:
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: .
+          additional_files: docker/entrypoint.sh

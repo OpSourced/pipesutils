@@ -162,7 +162,7 @@ RUN set -eux; \
     fi
 
 RUN groupadd -g "${PIPES_GID}" "${PIPES_USER}" \
- && useradd -u "${PIPES_UID}" -g "${PIPES_GID}" -m -d "/home/${PIPES_USER}" -s /bin/bash "${PIPES_USER}"
+ && useradd -l -u "${PIPES_UID}" -g "${PIPES_GID}" -m -d "/home/${PIPES_USER}" -s /bin/bash "${PIPES_USER}"
 
 ENV HOME="/home/${PIPES_USER}" \
     STEAMPIPE_INSTALL_DIR="/home/${PIPES_USER}/.steampipe" \
