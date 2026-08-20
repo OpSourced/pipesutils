@@ -1,55 +1,43 @@
 #!/usr/bin/env bash
 # pipesutils entrypoint.
 #
-# Keeps the image usable in three shapes:
+# Shapes this image runs in:
 #   * StatefulSet pod you `kubectl exec` into  (CMD: sleep infinity)
-#   * Job / CronJob running a collection or query  (CMD overridden)
-#   * `docker run pipesutils steampipe query ...`  (CMD overridden)
+#   * CronJob running a collection             (CMD overridden)
+#   * `docker run pipesutils tailpipe collect` (CMD overridden)
 #
 # Env:
-#   STEAMPIPE_START_SERVICE=true    start the embedded postgres in the
-#                                   background before running CMD, stop it on
-#                                   exit.
-#   STEAMPIPE_DATABASE_LISTEN       local (default) | network
-#   EXTRA_STEAMPIPE_PLUGINS         space separated plugins to install at
-#   EXTRA_TAILPIPE_PLUGINS          startup if not already baked in.
-#   EXTRA_CLI                       vendor CLIs to install at startup into
-#                                   $HOME/.local. Only "aws" is supported;
-#                                   see the note below.
+#   EXTRA_TAILPIPE_PLUGINS   space separated plugins to install at startup if
+#                            not already baked in.
+#   EXTRA_CLI                vendor CLIs to install at startup into
+#                            $HOME/.local. Only "aws" is supported; see below.
 set -euo pipefail
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
-# Persistent volumes mount in empty; make sure the dirs the CLIs expect exist.
-# Ignore failures so a read-only rootfs / read-only mount is not fatal.
-for d in "${STEAMPIPE_INSTALL_DIR:-}" "${TAILPIPE_INSTALL_DIR:-}" \
-         "${POWERPIPE_INSTALL_DIR:-}" "${PIPES_WORKSPACE_DIR:-}"; do
-  [ -n "$d" ] && mkdir -p "$d" 2>/dev/null || true
-done
+# Persistent volumes mount in empty; make sure the dirs tailpipe expects exist.
+# Ignore failures so a read-only mount is not fatal.
+mkdir -p "${TAILPIPE_INSTALL_DIR:-}/data" 2>/dev/null || true
 
 # --- startup installs ------------------------------------------------------
-# These land in $HOME, which is an image layer unless you mount a volume over
-# it - so they are re-installed on every start. Fine for a one-off or while
-# you work out what you need; bake them in with CLOUDS / STEAMPIPE_PLUGINS
-# once you know.
+# These land in $HOME, which is an image layer unless a volume is mounted over
+# it - so they are re-installed on every start. Fine while you work out what
+# you need; bake them in with CLOUDS once you know.
 
 install_plugins() {
-  local cli="$1" list="$2" p
+  local list="$1" p
   for p in $list; do
-    if "$cli" plugin list 2>/dev/null | grep -q "/${p%%@*}@"; then
-      echo "==> ${cli} plugin ${p} already present"
+    if tailpipe plugin list 2>/dev/null | grep -q "/${p%%@*}@"; then
+      echo "==> tailpipe plugin ${p} already present"
       continue
     fi
-    echo "==> installing ${cli} plugin ${p}"
-    "$cli" plugin install "$p" --progress=false
+    echo "==> installing tailpipe plugin ${p}"
+    tailpipe plugin install "$p" --progress=false
   done
 }
 
-if [ -n "${EXTRA_STEAMPIPE_PLUGINS:-}" ]; then
-  install_plugins steampipe "$EXTRA_STEAMPIPE_PLUGINS"
-fi
 if [ -n "${EXTRA_TAILPIPE_PLUGINS:-}" ]; then
-  install_plugins tailpipe "$EXTRA_TAILPIPE_PLUGINS"
+  install_plugins "$EXTRA_TAILPIPE_PLUGINS"
 fi
 
 install_cli() {
@@ -86,7 +74,6 @@ install_cli() {
     esac
     echo "!!! ${name} CLI cannot be installed at startup - it needs root and apt." >&2
     echo "    Use the image built with it: ${image}" >&2
-    echo "    (or build one: --build-arg CLOUDS=\"aws azure gcp\")" >&2
     return 1
     ;;
   *)
@@ -105,27 +92,4 @@ if [ "$#" -eq 0 ]; then
   set -- bash
 fi
 
-if [ "${STEAMPIPE_START_SERVICE:-false}" != "true" ]; then
-  exec "$@"
-fi
-
-echo "==> starting steampipe service (listen=${STEAMPIPE_DATABASE_LISTEN:-local})"
-steampipe service start --database-listen "${STEAMPIPE_DATABASE_LISTEN:-local}"
-
-child=""
-# shellcheck disable=SC2329  # invoked by the trap below
-shutdown() {
-  trap - INT TERM EXIT
-  [ -n "$child" ] && kill -TERM "$child" 2>/dev/null || true
-  echo "==> stopping steampipe service"
-  steampipe service stop || true
-}
-trap shutdown INT TERM EXIT
-
-# Background + wait, so signals reach the trap immediately instead of being
-# queued behind a foreground `sleep infinity`.
-"$@" &
-child=$!
-rc=0
-wait "$child" || rc=$?
-exit "$rc"
+exec "$@"

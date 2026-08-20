@@ -1,7 +1,7 @@
 name: cli-updates
 
-# Dependabot watches the base image but knows nothing about the CLI pins, so
-# check the turbot releases ourselves and open a PR when they move.
+# Dependabot watches the base image but knows nothing about the tailpipe pin,
+# so check the turbot release ourselves and open a PR when it moves.
 
 on:
   schedule:
@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           changed=""
-          for pair in "steampipe:STEAMPIPE_VERSION" "tailpipe:TAILPIPE_VERSION" "powerpipe:POWERPIPE_VERSION"; do
+          for pair in "tailpipe:TAILPIPE_VERSION"; do
             repo="${pair%%:*}"
             var="${pair##*:}"
             current="$(grep -oP "^ARG ${var}=\K.*" Dockerfile)"
@@ -53,8 +53,8 @@ jobs:
         if: steps.check.outputs.body != ''
         with:
           branch: chore/cli-updates
-          title: "build: bump Turbot Pipes CLI versions"
+          title: "build: bump Tailpipe version"
           body: ${{ steps.check.outputs.body }}
-          commit-message: "build: bump Turbot Pipes CLI versions"
+          commit-message: "build: bump Tailpipe version"
           labels: dependencies
           delete-branch: true

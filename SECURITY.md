@@ -14,16 +14,16 @@ We aim to acknowledge within 3 business days.
 The build and packaging: how binaries are fetched and verified, what the image
 runs as, what is baked into it, and what the workflow publishes.
 
-Vulnerabilities in **Steampipe, Tailpipe, Powerpipe or their plugins** belong
-upstream at [github.com/turbot](https://github.com/turbot) — this image ships
-those binaries unmodified. Tell us anyway if a fixed upstream release needs
+Vulnerabilities in **Tailpipe or its plugins** belong upstream at
+[github.com/turbot](https://github.com/turbot) — this image ships those
+binaries unmodified. Tell us anyway if a fixed upstream release needs
 picking up here, and we will bump the pinned version.
 
 ## Supply chain
 
-* The Turbot CLIs are downloaded from their upstream GitHub releases and
-  verified against the publisher's `checksums.txt` before installation. A
-  mismatch fails the build.
+* Tailpipe is downloaded from its upstream GitHub release and verified
+  against the publisher's `checksums.txt` before installation. A mismatch
+  fails the build.
 * The AWS CLI v2 installer is GPG-verified against the AWS CLI Team key,
   committed at `hack/aws-cli-public-key.asc`. The build asserts both a valid
   signature and the exact fingerprint, so an expired-key warning cannot pass
@@ -52,10 +52,10 @@ picking up here, and we will bump the pinned version.
 
 ## Hardening notes for operators
 
-The image runs as uid/gid 10001 and needs no capabilities. It does need a
-writable filesystem under `$STEAMPIPE_INSTALL_DIR` for the embedded PostgreSQL
-data directory, so `readOnlyRootFilesystem: true` will not work without
-mounting writable volumes over those paths.
+The image runs as uid/gid 10001 and needs no capabilities. It needs write
+access only to `$TAILPIPE_INSTALL_DIR` — the parquet lake and the plugin
+directory — so `readOnlyRootFilesystem: true` works if you mount writable
+volumes over those paths.
 
 Credentials are never baked in. Supply them at run time — IRSA/Pod Identity on
 EKS, or the usual AWS environment variables elsewhere.

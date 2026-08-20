@@ -7,14 +7,8 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      steampipe_version:
-        description: Steampipe release tag (blank = Dockerfile default)
-        required: false
       tailpipe_version:
         description: Tailpipe release tag (blank = Dockerfile default)
-        required: false
-      powerpipe_version:
-        description: Powerpipe release tag (blank = Dockerfile default)
         required: false
   schedule:
     # weekly rebuild to pick up base image / CVE patches
@@ -93,9 +87,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             CLOUDS=${{ matrix.variant.clouds }}
-            ${{ inputs.steampipe_version && format('STEAMPIPE_VERSION={0}', inputs.steampipe_version) || '' }}
             ${{ inputs.tailpipe_version && format('TAILPIPE_VERSION={0}', inputs.tailpipe_version) || '' }}
-            ${{ inputs.powerpipe_version && format('POWERPIPE_VERSION={0}', inputs.powerpipe_version) || '' }}
           cache-from: type=gha,scope=${{ steps.prep.outputs.pair }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=max,scope={0}', steps.prep.outputs.pair) || '' }}
           # PRs build and smoke-test only; nothing is pushed.
@@ -108,20 +100,17 @@ jobs:
         run: |
           docker run --rm pipesutils:pr bash -lc '
             set -e
-            steampipe --version
             tailpipe --version
-            powerpipe --version
-            steampipe plugin list
             tailpipe plugin list
-            steampipe query "select 1 as ok" --output json
-            # every selected cloud must have brought its vendor CLI with it
+            tailpipe query "select 1 as ok"
+            # every selected cloud must have brought its plugin and vendor CLI
             for cloud in $PIPES_CLOUDS; do
               case "$cloud" in
                 aws)   aws --version ;;
                 azure) az version --output tsv ;;
                 gcp)   gcloud --version | head -1 ;;
               esac
-              steampipe plugin list | grep -q "/$cloud@"
+              tailpipe plugin list | grep -q "/$cloud@"
             done
           '
 

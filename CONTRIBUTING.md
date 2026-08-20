@@ -1,7 +1,8 @@
 # Contributing
 
 Thanks for taking a look. This repo is small on purpose: it builds one image
-containing the [Turbot Pipes](https://turbot.com) CLIs and nothing else.
+containing [Tailpipe](https://tailpipe.io), its plugin for one cloud, and that
+cloud's vendor CLI. Nothing else.
 
 ## What belongs here
 
@@ -16,7 +17,7 @@ image is meant to be dropped into whatever you already run.
 
 ```bash
 docker build -t pipesutils:dev .
-docker run --rm pipesutils:dev steampipe query "select 1"
+docker run --rm pipesutils:dev tailpipe query "select 1"
 ```
 
 The default build is AWS-only. CI publishes one image per cloud, and you can
@@ -35,23 +36,21 @@ For fast iteration on the Dockerfile itself, skip the slow parts:
 
 ```bash
 docker build \
-  --build-arg STEAMPIPE_PLUGINS=" " \
   --build-arg TAILPIPE_PLUGINS=" " \
   --build-arg INSTALL_AWS_CLI=false \
-  --build-arg PRELOAD_STEAMPIPE_DB=false \
   -t pipesutils:dev .
 ```
 
-## Bumping CLI versions
+## Bumping the tailpipe version
 
-Change the `STEAMPIPE_VERSION` / `TAILPIPE_VERSION` / `POWERPIPE_VERSION`
-defaults in the `Dockerfile`. Releases are checksum-verified against the
-publisher's `checksums.txt`, so a bad tag fails the build rather than shipping.
+Change the `TAILPIPE_VERSION` default in the `Dockerfile`. Releases are
+checksum-verified against the publisher's `checksums.txt`, so a bad tag fails
+the build rather than shipping.
 
 To test a version without committing:
 
 ```bash
-docker build --build-arg STEAMPIPE_VERSION=v2.4.4 -t pipesutils:test .
+docker build --build-arg TAILPIPE_VERSION=v0.7.3 -t pipesutils:test .
 ```
 
 The same inputs exist on the `workflow_dispatch` trigger.
@@ -90,8 +89,7 @@ Rules we deliberately ignore are listed with their reasons in
 
   ```bash
   docker run --rm pipesutils:dev bash -lc '
-    steampipe --version && tailpipe --version && powerpipe --version &&
-    steampipe query "select 1 as ok" --output json'
+    tailpipe --version && tailpipe plugin list && tailpipe query "select 1 as ok"'
   ```
 
 CI runs that same smoke test on both `linux/amd64` and `linux/arm64` and
@@ -99,15 +97,14 @@ pushes nothing for pull requests.
 
 ## Things worth knowing before you change the Dockerfile
 
-* **The image cannot run as root.** Steampipe refuses uid 0, and its embedded
-  `initdb` needs the uid to resolve to a real passwd entry. The `pipes` user
-  (uid 10001) is load-bearing.
-* **musl bases will not work.** Steampipe v2's FDW requires glibc >= 2.34. On
-  alpine `tailpipe` will not exec at all and steampipe's embedded postgres
-  fails at `Initializing database`. The README's "Why this base" section has
-  the full comparison, including why Wolfi and distroless were rejected — read
-  it before proposing a base change.
-* `libstdc++6` is needed by the DuckDB engine inside Tailpipe and Powerpipe.
+* **musl bases will not work.** Tailpipe embeds DuckDB, so it is a cgo build
+  dynamically linked against glibc; on alpine it will not exec at all. The
+  README's "Why this base" section has the full comparison, including why
+  Wolfi and distroless were rejected — read it before proposing a base change.
+* **Non-root is a choice, not a requirement.** Tailpipe runs fine as root, so
+  nothing breaks loudly if uid 10001 is changed. Keep it anyway; only the lake
+  and the plugin directory need write access.
+* `libstdc++6` is needed by the DuckDB engine inside Tailpipe.
 * The embedded PostgreSQL binaries bundle their own OpenSSL and do not link
   ICU, so do not add `libicu` back "just in case".
 * Anything a build can exclude must be decided in the **fetch stage**. A
