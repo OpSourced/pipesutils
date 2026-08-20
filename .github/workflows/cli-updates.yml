@@ -1,0 +1,60 @@
+name: cli-updates
+
+# Dependabot watches the base image but knows nothing about the CLI pins, so
+# check the turbot releases ourselves and open a PR when they move.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check for newer CLI releases
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          changed=""
+          for pair in "steampipe:STEAMPIPE_VERSION" "tailpipe:TAILPIPE_VERSION" "powerpipe:POWERPIPE_VERSION"; do
+            repo="${pair%%:*}"
+            var="${pair##*:}"
+            current="$(grep -oP "^ARG ${var}=\K.*" Dockerfile)"
+            latest="$(gh release view --repo "turbot/${repo}" --json tagName -q .tagName)"
+            if [ "$current" != "$latest" ]; then
+              echo "${repo}: ${current} -> ${latest}"
+              sed -i "s|^ARG ${var}=.*|ARG ${var}=${latest}|" Dockerfile
+              changed="${changed}- \`${repo}\` ${current} → ${latest}"$'\n'
+            fi
+          done
+          if [ -n "$changed" ]; then
+            {
+              echo "body<<EOF"
+              echo "$changed"
+              echo
+              echo "Opened by the weekly \`cli-updates\` workflow. CI builds both"
+              echo "architectures and smoke-tests the CLIs before this can merge."
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: peter-evans/create-pull-request@v8
+        if: steps.check.outputs.body != ''
+        with:
+          branch: chore/cli-updates
+          title: "build: bump Turbot Pipes CLI versions"
+          body: ${{ steps.check.outputs.body }}
+          commit-message: "build: bump Turbot Pipes CLI versions"
+          labels: dependencies
+          delete-branch: true

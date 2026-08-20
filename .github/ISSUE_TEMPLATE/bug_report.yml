@@ -1,0 +1,37 @@
+name: Bug report
+description: Something in the image or the build does not work
+labels: [bug]
+body:
+  - type: input
+    id: image
+    attributes:
+      label: Image tag or digest
+      placeholder: ghcr.io/opsourced/pipesutils:latest (sha256:...)
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [linux/amd64, linux/arm64, both]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the command you ran and the full output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: CLI versions
+      description: Output of `docker run --rm <image> bash -lc 'steampipe -v; tailpipe -v; powerpipe -v'`
+      render: shell

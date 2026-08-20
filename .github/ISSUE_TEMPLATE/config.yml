@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Steampipe / Tailpipe / Powerpipe bugs
+    url: https://github.com/turbot
+    about: The CLIs are shipped here unmodified - report their bugs upstream.
+  - name: Security vulnerability
+    url: https://github.com/OpSourced/pipesutils/security/advisories/new
+    about: Please report privately rather than in a public issue.
