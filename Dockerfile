@@ -18,7 +18,7 @@
 ARG DEBIAN_TAG=bookworm-slim
 
 # Renovate/dependabot-friendly pin. Bump to upgrade the CLI.
-ARG TAILPIPE_VERSION=v0.7.4
+ARG TAILPIPE_VERSION=v0.7.5
 
 # Which clouds this image speaks. Space separated: aws, azure, gcp.
 ARG CLOUDS="aws"
